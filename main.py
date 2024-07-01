@@ -1,186 +1,160 @@
-"""
-Ao executar o programa, selecione o ângulo e posição da câmera 
-desejados e aperte 'q' para iniciar a simulação.
-"""
-
 import math
 import time
 import numpy as np
 import pyvista as pv
 
 #-------------------------------------------------------------------
-# Global variables
+# Variáveis globais
 #-------------------------------------------------------------------
-# Size of mesh (cloth) in points. They are all 1 unit apart.
-size_x = 40
-size_y = 25
-straight_bar_size = 1
-diagonal_bar_size = math.sqrt(2)
+# Tamanho da malha (tecido) em pontos. Todos estão separados por 1 unidade.
+TAMANHO_X = 40
+TAMANHO_Y = 25
+TAMANHO_BARRA_RETA = 1
+TAMANHO_BARRA_DIAGONAL = math.sqrt(2)
 
-# Accelerations
-wind = [10, 0, 2]
-gravity = [0, -9.8, 0]
+# Acelerações
+VENTO = [10, 0, 2]
+GRAVIDADE = [0, -9.8, 0]
 
-points = [] # [x, y, z]
-last_points = [] # stores (i-1) data for points
-faces = [] # [num_vertices, vertices_indexes...]
-bars = [] # [vertice_index, vertice_index, size]
-secondary_bars = [] # [vertice_index, vertice_index, size]
+# Listas para armazenar pontos e barras
+pontos = []  # [x, y, z]
+ultimos_pontos = []  # Armazena dados (i-1) para os pontos
+faces = []  # [num_vertices, indices_vertices...]
+barras = []  # [indice_vertice, indice_vertice, tamanho]
+barras_secundarias = []  # [indice_vertice, indice_vertice, tamanho]
 
-camera_pos = [
-	(20, 0, 120), # camera location
-	(20, 0, 0),   # focus point
-	(0, 0, 0),    # viewup vector
+# Posição da câmera
+POSICAO_CAMERA = [
+    (20, 0, 120),  # Localização da câmera
+    (20, 0, 0),  # Ponto de foco
+    (0, 0, 0),  # Vetor viewup
 ]
 
 #-------------------------------------------------------------------
-# Auxiliar methods
+# Métodos auxiliares
 #-------------------------------------------------------------------
-def is_mobile(index):
-	"""Returns wether the point with given index is mobile or not"""
-	return index%size_y != 0
+def eh_movel(indice):
+    """Retorna se o ponto com o índice dado é móvel ou não"""
+    return indice % TAMANHO_Y != 0
 
-def norm(v):
-	"""Returns norm of vector v"""
-	sum_ = 0
-	for val in v:
-		sum_ += val*val
-	return math.sqrt(sum_)
+def norma(v):
+    """Retorna a norma do vetor v"""
+    return math.sqrt(sum(val ** 2 for val in v))
 
-def add(u, v):
-	"""Returns (u+v)"""
-	w = u.copy()
-	for i,val in enumerate(v):
-		w[i] += val
-	return w
+def soma(u, v):
+    """Retorna (u + v)"""
+    return [u[i] + v[i] for i in range(len(u))]
 
-def subtract(u, v):
-	"""Returns (u-v)"""
-	w = u.copy()
-	for i,val in enumerate(v):
-		w[i] -= val
-	return w
+def subtrai(u, v):
+    """Retorna (u - v)"""
+    return [u[i] - v[i] for i in range(len(u))]
 
-def multiply(v, k):
-	"""Returns multiplication of vector v with scalar k"""
-	u = v.copy()
-	for i,val in enumerate(u):
-		u[i] *= k
-	return u
+def multiplica(v, k):
+    """Retorna a multiplicação do vetor v com o escalar k"""
+    return [val * k for val in v]
 
 #-------------------------------------------------------------------
-# Methods
+# Métodos
 #-------------------------------------------------------------------
-def impose_constraint():
-	"""Imposes constraint on bars"""
-	for k in range(0, 20):
-		# For each bar, we try to restore its original size
-		for i,bar in enumerate(bars+secondary_bars):
-			# First, we access the points that the bar connects
-			a = points[bar[0]]
-			b = points[bar[1]]
-			# Then, we find its current size and direction
-			d = subtract(b, a)
-			dist = norm(d)
-			u = multiply(d, 1/dist)
-			# Finally, we calculate how much the bar should shrink or enlarge, and
-			# move the connected particles to restore its original size. If both points 
-			# are mobile, each should be responsible for restoring half of the difference.
-			# If only one is mobile, than it is solely responsible for making up for the
-			# difference caused by moving the points independently.
-			dif = 0.9*(dist - bar[2])
-			if is_mobile(bar[0]):
-				if is_mobile(bar[1]):
-					points[bar[0]] = add(a, multiply(u, dif/2))
-				else:
-					points[bar[0]] = add(a, multiply(u, dif))
-			if is_mobile(bar[1]):
-				if is_mobile(bar[0]):
-					points[bar[1]] = add(b, multiply(u, -dif/2))
-				else:
-					points[bar[1]] = add(b, multiply(u, -dif))
+def impõe_restrição():
+    """Impõe restrição nas barras"""
+    for _ in range(20):
+        for barra in barras + barras_secundarias:
+            a = pontos[barra[0]]
+            b = pontos[barra[1]]
+            d = subtrai(b, a)
+            dist = norma(d)
+            u = multiplica(d, 1 / dist)
+            dif = 0.9 * (dist - barra[2])
 
-def animate(h):
-	"""Animates mesh"""
-	global points, last_points
-	points_i = points.copy() # storing points in current state to later save them in last_points
-	damp_ratio = 0.02
+            if eh_movel(barra[0]):
+                if eh_movel(barra[1]):
+                    pontos[barra[0]] = soma(a, multiplica(u, dif / 2))
+                else:
+                    pontos[barra[0]] = soma(a, multiplica(u, dif))
 
-	# First, we move each point independently through Verlet's Method
-	for i,point in enumerate(points):
-		if is_mobile(i):
-			point[0] = point[0] + ((1 - damp_ratio)*(point[0] - last_points[i][0]))\
-				+ (h*h)*(wind[0]+gravity[0])
-			point[1] = point[1] + ((1 - damp_ratio)*(point[1] - last_points[i][1]))\
-				+ (h*h)*(wind[1]+gravity[1])
-			point[2] = point[2] + ((1 - damp_ratio)*(point[2] - last_points[i][2]))\
-				+ (h*h)*(wind[2]+gravity[2])
-	# Then, we impose constraint bars restrictions
-	impose_constraint()
-	last_points = points_i
+            if eh_movel(barra[1]):
+                if eh_movel(barra[0]):
+                    pontos[barra[1]] = soma(b, multiplica(u, -dif / 2))
+                else:
+                    pontos[barra[1]] = soma(b, multiplica(u, -dif))
 
-def init():
-	"""Sets up points and faces in mesh and constraint bars"""
-	global last_points
-	point_index = 0
-	for j in range(0, size_x):
-		for i in range(0, size_y):
-			# Create the vertice
-			points.append([j, i, 0])
-			
-			# Create the faces, made up of 4 adjacent points, and the adjacent bars
-			if j<size_x-1 and i<size_y-1:
-				faces.append([4, point_index, point_index+1, point_index+size_y+1, point_index+size_y])
-				bars.append([point_index, point_index+1, straight_bar_size])
-				bars.append([point_index, point_index+size_y+1, diagonal_bar_size])
-				bars.append([point_index, point_index+size_y, straight_bar_size])
-			elif j==size_x-1 and i<size_y-1:
-				bars.append([point_index, point_index+1, straight_bar_size])
-			elif i==size_y-1 and j<size_x-1:
-				bars.append([point_index, point_index+size_y, straight_bar_size])
+def animar(h):
+    """Anima a malha"""
+    global pontos, ultimos_pontos
+    pontos_i = [p.copy() for p in pontos]
+    coef_amortecimento = 0.2
 
-			# Create non-adjacent bars
-			if j%2 == 0: # skipping odd columns for secondary bars
-				if j<size_x-2 and i<size_y-2:
-					secondary_bars.append([point_index, point_index+2, 2*straight_bar_size])
-					secondary_bars.append([point_index, point_index+(2*(size_y+1)), 2*diagonal_bar_size])
-					secondary_bars.append([point_index, point_index+(2*size_y), 2*straight_bar_size])
-				elif j==size_x-1 and i<size_y-2:
-					secondary_bars.append([point_index, point_index+2, 2*straight_bar_size])
-				elif i==size_y-1 and j<size_x-2:
-					secondary_bars.append([point_index, point_index+(2*size_y), 2*straight_bar_size])
+    for i, ponto in enumerate(pontos):
+        if eh_movel(i):
+            ponto[0] += (1 - coef_amortecimento) * (ponto[0] - ultimos_pontos[i][0]) + (h ** 2) * (VENTO[0] + GRAVIDADE[0])
+            ponto[1] += (1 - coef_amortecimento) * (ponto[1] - ultimos_pontos[i][1]) + (h ** 2) * (VENTO[1] + GRAVIDADE[1])
+            ponto[2] += (1 - coef_amortecimento) * (ponto[2] - ultimos_pontos[i][2]) + (h ** 2) * (VENTO[2] + GRAVIDADE[2])
 
-			point_index += 1
+    impõe_restrição()
+    ultimos_pontos = pontos_i
 
-	last_points = points.copy()
+def iniciar():
+    """Configura pontos e faces na malha e restrições de barras"""
+    global ultimos_pontos
+    indice_ponto = 0
+    for j in range(TAMANHO_X):
+        for i in range(TAMANHO_Y):
+            pontos.append([j, i, 0])
+
+            if j < TAMANHO_X - 1 and i < TAMANHO_Y - 1:
+                faces.append([4, indice_ponto, indice_ponto + 1, indice_ponto + TAMANHO_Y + 1, indice_ponto + TAMANHO_Y])
+                barras.append([indice_ponto, indice_ponto + 1, TAMANHO_BARRA_RETA])
+                barras.append([indice_ponto, indice_ponto + TAMANHO_Y + 1, TAMANHO_BARRA_DIAGONAL])
+                barras.append([indice_ponto, indice_ponto + TAMANHO_Y, TAMANHO_BARRA_RETA])
+            elif j == TAMANHO_X - 1 and i < TAMANHO_Y - 1:
+                barras.append([indice_ponto, indice_ponto + 1, TAMANHO_BARRA_RETA])
+            elif i == TAMANHO_Y - 1 and j < TAMANHO_X - 1:
+                barras.append([indice_ponto, indice_ponto + TAMANHO_Y, TAMANHO_BARRA_RETA])
+
+            if j % 2 == 0:
+                if j < TAMANHO_X - 2 and i < TAMANHO_Y - 2:
+                    barras_secundarias.append([indice_ponto, indice_ponto + 2, 2 * TAMANHO_BARRA_RETA])
+                    barras_secundarias.append([indice_ponto, indice_ponto + 2 * (TAMANHO_Y + 1), 2 * TAMANHO_BARRA_DIAGONAL])
+                    barras_secundarias.append([indice_ponto, indice_ponto + 2 * TAMANHO_Y, 2 * TAMANHO_BARRA_RETA])
+                elif j == TAMANHO_X - 1 and i < TAMANHO_Y - 2:
+                    barras_secundarias.append([indice_ponto, indice_ponto + 2, 2 * TAMANHO_BARRA_RETA])
+                elif i == TAMANHO_Y - 1 and j < TAMANHO_X - 2:
+                    barras_secundarias.append([indice_ponto, indice_ponto + 2 * TAMANHO_Y, 2 * TAMANHO_BARRA_RETA])
+
+            indice_ponto += 1
+
+    ultimos_pontos = [p.copy() for p in pontos]
 
 #-------------------------------------------------------------------
-# Execution
+# Execução
 #-------------------------------------------------------------------
-init()
-print("Choose camera angle and position")
-print("To star the animation, click 'q'")
+iniciar()
+print("Escolha o ângulo e posição da câmera")
+print("Para iniciar a animação, clique 'q'")
 
-# Plotting mesh
 plotter = pv.Plotter()
-mesh = pv.PolyData(np.array(points), np.array(faces))
-plotter.add_mesh(mesh, color='y', show_edges=False, interpolate_before_map=True)
+malha = pv.PolyData(np.array(pontos), np.array(faces))
+plotter.add_mesh(malha, color='y', show_edges=False, interpolate_before_map=True)
 plotter.add_axes()
 plotter.enable_eye_dome_lighting()
-plotter.camera_position = camera_pos
+plotter.camera_position = POSICAO_CAMERA
 plotter.show(interactive=True, auto_close=False, window_size=[800, 600])
 
-plotter.open_gif("animation.gif")
+plotter.open_gif("animacao.gif")
 plotter.write_frame()
 
-n_steps = 75
-for i in range(n_steps):
-	start = time.time()
-	animate(0.4)
-	end = time.time()
-	print(f"   Plotting step {i+1} of {n_steps}... elapsed time for 0.4s step: {(end - start)}s", end="\r")
-	plotter.update_coordinates(np.array(points), mesh=mesh)
-	plotter.write_frame()
+n_passos = 75
+tempo_total = 0
+for i in range(n_passos):
+    inicio = time.time()
+    animar(0.4)
+    fim = time.time()
+    print(f"   Plotando passo {i+1} de {n_passos}... tempo decorrido para passo de 0.4s: {(fim - inicio)}s", end="\r")
+    tempo_total += (fim - inicio)
+    plotter.update_coordinates(np.array(pontos), mesh=malha)
+    plotter.write_frame()
 
 print("\n")
 plotter.close()
+print(tempo_total)
