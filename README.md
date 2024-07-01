@@ -1,9 +1,9 @@
-# inf1608-tecido
+# INF1608 - Tecido
 
 Simulação em 3D de um pedaço de tecido sob ação da gravidade
 e do vento.
 
-<img src='animation.gif'>
+<img src='animacao.gif'>
 
 ## Dependencias
 
@@ -11,9 +11,8 @@ e do vento.
 * pyvista
 
 ## Como rodar
-
 ```
 python main.py
 ```
-
 Use o mouse para posicionar a câmera e aperte 'q' para iniciar a simulação.
+
